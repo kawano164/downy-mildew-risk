@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ベト病 感染リスク予測（マルチモデル）</title>
+<style>
+:root{
+  --bg:#f6f5f1; --card:#fff; --ink:#1f2421; --sub:#6b716d; --line:#e2e0d9;
+  --l0:#e9ecea; --l1:#cfe8d4; --l2:#f5e3a3; --l3:#f3b27a; --l4:#e0645a;
+  --t0:#4b524e; --t1:#215c31; --t2:#6b5300; --t3:#7a3a00; --t4:#fff;
+  --accent:#5a3d6b;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.55}
+main{max-width:760px;margin:0 auto;padding:14px 14px 60px}
+h1{font-size:19px;margin:6px 0 2px}
+.lead{color:var(--sub);font-size:13px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.presets button,.btn{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 12px;font-size:14px;color:var(--ink);cursor:pointer}
+.presets button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+input,select{font-size:15px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+input[type=number]{width:120px}
+label.s{font-size:12px;color:var(--sub);display:block;margin-bottom:2px}
+.status{font-size:13px;color:var(--sub);margin-top:8px;min-height:1em}
+.status.err{color:#b3261e}
+.badge{display:flex;gap:14px;align-items:center}
+.big{width:86px;height:86px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;flex:none}
+.big .n{font-size:30px;line-height:1}
+.big .w{font-size:13px;margin-top:4px}
+.lv0{background:var(--l0);color:var(--t0)} .lv1{background:var(--l1);color:var(--t1)}
+.lv2{background:var(--l2);color:var(--t2)} .lv3{background:var(--l3);color:var(--t3)}
+.lv4{background:var(--l4);color:var(--t4)}
+.muted{color:var(--sub);font-size:13px}
+.days{display:flex;flex-direction:column;gap:6px}
+.day{display:grid;grid-template-columns:74px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:#fff}
+.day.sel{outline:2px solid var(--accent);outline-offset:-1px}
+.day .d{font-weight:600;font-size:14px}
+.day .wx{font-size:13px;color:var(--sub)}
+.chip{border-radius:8px;padding:3px 9px;font-size:13px;font-weight:700;white-space:nowrap}
+.range{display:inline-flex;gap:2px;margin-left:6px;vertical-align:middle}
+.range i{display:block;width:7px;height:14px;border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid var(--line);padding:6px 4px;text-align:center}
+th{background:#faf9f6;font-weight:600}
+td.c{font-weight:700}
+.tblwrap{overflow-x:auto}
+details{border-top:1px solid var(--line);padding:8px 0}
+details:first-of-type{border-top:none}
+summary{cursor:pointer;font-weight:600;font-size:14px}
+details p,details ul{font-size:13px;margin:6px 0;color:#353b37}
+.legend{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.legend span{font-size:12px;padding:2px 8px;border-radius:6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px}
+.kv b{font-weight:600}
+.foot{font-size:12px;color:var(--sub);margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+<h1>ベト病 感染リスク予測</h1>
+<p class="lead">4つの気象予報モデル × 5つの感染モデルで、向こう7日間の一次感染リスクを幅で見るツール。対象は <i>Vitis vinifera</i>（高感受性で固定）。</p>
+
+<section class="card">
+  <h2>地点</h2>
+  <div class="row presets" id="presets"></div>
+  <div class="row" style="margin-top:10px">
+    <div><label class="s">緯度</label><input type="number" id="lat" step="0.0001"></div>
+    <div><label class="s">経度</label><input type="number" id="lon" step="0.0001"></div>
+    <div><label class="s">&nbsp;</label><button class="btn" id="geo">現在地</button></div>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <div><label class="s">生育ステージ</label>
+      <select id="stageSel">
+        <option value="auto">自動（GDDから推定）</option>
+        <option value="0">休眠・萌芽前／落葉後</option>
+        <option value="1">展葉期（新梢10cm前後）</option>
+        <option value="2">開花前</option>
+        <option value="3">開花期（最も感受性が高い）</option>
+        <option value="4">結実期以降</option>
+      </select>
+    </div>
+    <div><label class="s">&nbsp;</label><button class="btn primary" id="run">予測する</button></div>
+  </div>
+  <div class="status" id="status"></div>
+</section>
+
+<div id="out"></div>
+
+<section class="card">
+  <h2>モデルの説明</h2>
+  <details><summary>気象予報モデル（4つ）</summary>
+    <ul>
+      <li><b>JMA</b>：気象庁（日本付近は解像度が高い）</li>
+      <li><b>ECMWF</b>：欧州中期予報センター IFS 0.25°</li>
+      <li><b>GFS</b>：米国NOAA</li>
+      <li><b>ICON</b>：ドイツ気象局</li>
+    </ul>
+    <p>Open-Meteoの <code>/v1/forecast?models=…</code> で1回のリクエストでまとめて取得しています。モデルによって予報期間が短く、後半の日が欠けることがあります（その場合は「—」）。</p>
+  </details>
+  <details><summary>3-10ルール</summary>
+    <p>新梢10cm以上・気温10℃以上・24〜48時間で10mm以上の降雨、の3条件がそろうと一次感染が起こりうるという古典的な目安。安全側（感染を見落としにくい）だが、過大評価しやすい。ここでは最低気温・日降水量で判定し、平均気温18〜25℃で1段階上げています。</p>
+  </details>
+  <details><summary>Magarey型（濡れ時間×温度）</summary>
+    <p>2.5mm超の降雨と平均気温11℃超を引き金に、葉の濡れ時間と気温の積（度・時）で感染の成立を判定する考え方。ここでは濡れ時間×平均気温が50・100度時を超えるかで段階づけた簡易版です。</p>
+  </details>
+  <details><summary>Lalancette型（温度効率）</summary>
+    <p>遊走子のう発芽・感染の温度効率（15〜20℃で最大）を濡れ時間に掛けて「有効な濡れ時間」に換算し、その長さで段階づけます。低温の日はいくら濡れても効率が下がる、という北海道で効きやすいモデル。</p>
+  </details>
+  <details><summary>Caffi型（動的モデル）</summary>
+    <p>卵胞子の成熟→発芽→雨滴による飛散→感染、を段階的に追うRossi/Caffiの動的モデルの考え方を、日単位に簡略化したもの。2.5mm以上の降雨（飛散）と4時間以上の濡れが必要で、温度効率と降雨量で段階づけています。</p>
+  </details>
+  <details><summary>夜間胞子形成</summary>
+    <p>二次感染源となる胞子形成は、夜間（20時〜翌6時）の高湿度（相対湿度92%以上）が4時間以上続き、気温13℃以上のときに進みます。夜間の高湿時間と気温で段階づけています。</p>
+  </details>
+  <details><summary>総合評価と生育ステージ</summary>
+    <p>その日の20通り（気象4×感染5）の中央値を総合レベル、最小〜最大をリスクの幅として表示します。生育ステージは4月1日からの有効積算温度（基準10℃、ERA5再解析）で推定し、萌芽前・落葉後は感受性なしとしてリスク0にします。11〜3月は自動で休眠扱いです。</p>
+    <p>どのモデルもここでは簡略化した実装です。散布判断は圃場の観察と合わせて使ってください。</p>
+  </details>
+  <div class="legend">
+    <span class="lv0">0 なし</span><span class="lv1">1 低</span><span class="lv2">2 中</span><span class="lv3">3 高</span><span class="lv4">4 非常に高</span>
+  </div>
+</section>
+
+<p class="foot">気象データ：<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（予報・ERA5再解析）。ブラウザから直接取得しています。</p>
+</main>
+
+<script>
+/* ===== 定数 ===== */
+const PRESETS = [
+  {name:"岩見沢（栗沢）", lat:43.1530, lon:141.8370},
+  {name:"岩見沢（市街）", lat:43.1962, lon:141.7759},
+  {name:"余市", lat:43.1903, lon:140.7836},
+];
+const WEATHER_MODELS = [
+  {key:"jma_seamless",  label:"JMA"},
+  {key:"ecmwf_ifs025",  label:"ECMWF"},
+  {key:"gfs_seamless",  label:"GFS"},
+  {key:"icon_seamless", label:"ICON"},
+];
+const DISEASE_MODELS = [
+  {key:"r310", label:"3-10ルール"},
+  {key:"mag",  label:"Magarey型"},
+  {key:"lal",  label:"Lalancette型"},
+  {key:"caf",  label:"Caffi型"},
+  {key:"spo",  label:"夜間胞子形成"},
+];
+const LEVEL_WORD = ["なし","低","中","高","非常に高"];
+const STAGES = [
+  {name:"休眠・萌芽前／落葉後", susceptible:false, shoots10:false},
+  {name:"展葉期", susceptible:true, shoots10:true},
+  {name:"開花前", susceptible:true, shoots10:true},
+  {name:"開花期", susceptible:true, shoots10:true},
+  {name:"結実期以降", susceptible:true, shoots10:true},
+];
+
+/* ===== 計算（純粋関数） ===== */
+function stageFromGDD(gdd, month){
+  if (month >= 11 || month <= 3) return 0;          // 11〜3月は休眠扱い
+  if (gdd < 50)  return 0;
+  if (gdd < 150) return 1;
+  if (gdd < 300) return 2;
+  if (gdd < 450) return 3;
+  return 4;
+}
+function relEff(T){ // 温度効率 15〜20℃で1
+  if (T == null) return 0;
+  if (T >= 15 && T <= 20) return 1;
+  if (T < 15) return Math.max(0, 1 - (15 - T) * 0.13);
+  return Math.max(0, 1 - (T - 20) * 0.10);
+}
+// 1モデル分の時別データから日別の指標を作る
+function dailyStats(times, temp, rh, prec){
+  const days = {};
+  for (let i = 0; i < times.length; i++){
+    const t = temp[i], h = rh[i], p = prec[i];
+    if (t == null && h == null && p == null) continue;
+    const date = times[i].slice(0,10), hour = +times[i].slice(11,13);
+    const d = days[date] || (days[date] = {n:0,tmax:-99,tmin:99,tsum:0,tn:0,rain:0,wet:0,wetT:0,night:0,nightT:0,rhmax:0});
+    d.n++;
+    if (t != null){ d.tmax=Math.max(d.tmax,t); d.tmin=Math.min(d.tmin,t); d.tsum+=t; d.tn++; }
+    if (p != null) d.rain += p;
+    if (h != null) d.rhmax = Math.max(d.rhmax, h);
+    const wet = (p != null && p >= 0.2) || (h != null && h >= 90);
+    if (wet){ d.wet++; if (t != null) d.wetT += t; }
+    const isNight = hour >= 20 || hour < 6;
+    if (isNight && h != null && h >= 92){ d.night++; if (t != null) d.nightT += t; }
+  }
+  const out = {};
+  for (const [date,d] of Object.entries(days)){
+    if (d.n < 18 || d.tn < 18) continue; // ほぼ1日分そろった日のみ
+    out[date] = {
+      tmax:d.tmax, tmin:d.tmin, tmean:d.tsum/d.tn, rain:d.rain,
+      wet:d.wet, wetMeanT: d.wet ? d.wetT/d.wet : null,
+      night:d.night, nightMeanT: d.night ? d.nightT/d.night : null, rhmax:d.rhmax
+    };
+  }
+  return out;
+}
+function score(model, s, stage){
+  const st = STAGES[stage];
+  if (!st.susceptible) return 0;
+  const T = s.tmean;
+  switch(model){
+    case "r310": {
+      if (!st.shoots10) return 0;
+      let v = 0;
+      if (s.tmin >= 10 && s.rain >= 10) v = 3;
+      else if (s.tmin >= 8 && s.rain >= 5) v = 2;
+      else if (T >= 10 && s.rain >= 2) v = 1;
+      if (v > 0 && T >= 18 && T <= 25) v = Math.min(4, v + 1);
+      return v;
+    }
+    case "mag": {
+      if (!(s.rain > 2.5 && T > 11)) return 0;
+      const dh = s.wet * (s.wetMeanT ?? T);
+      if (dh >= 100) return 4;
+      if (dh >= 50) return 3;
+      return 2;
+    }
+    case "lal": {
+      if (s.wet < 2) return 0;
+      const eff = s.wet * relEff(s.wetMeanT ?? T);
+      if (eff >= 9) return 4;
+      if (eff >= 6) return 3;
+      if (eff >= 4) return 2;
+      if (eff >= 2) return 1;
+      return 0;
+    }
+    case "caf": {
+      if (s.rain < 2.5 || s.wet < 4) return 0;
+      const e = relEff(s.wetMeanT ?? T);
+      let v = Math.round((T >= 15 && T <= 20 ? 3 : 2) * e);
+      if (s.rain >= 10) v += 1;
+      return Math.max(0, Math.min(4, v));
+    }
+    case "spo": {
+      if (s.night < 4) return 0;
+      const nt = s.nightMeanT ?? T;
+      if (nt < 13) return s.night >= 8 ? 1 : 0;
+      let v = 2;
+      if (nt >= 15 && nt <= 22) v++;
+      if (s.night >= 8) v++;
+      return Math.min(4, v);
+    }
+  }
+  return 0;
+}
+function median(a){
+  const b = [...a].sort((x,y)=>x-y), m = b.length >> 1;
+  return b.length % 2 ? b[m] : Math.round((b[m-1] + b[m]) / 2);
+}
+// 全体の評価: {dates, perDay:{date:{matrix, stats, overall, min, max}}}
+function evaluate(api, stage){
+  const H = api.hourly, times = H.time;
+  const statsByModel = {};
+  for (const wm of WEATHER_MODELS){
+    const t = H[`temperature_2m_${wm.key}`], h = H[`relative_humidity_2m_${wm.key}`], p = H[`precipitation_${wm.key}`];
+    statsByModel[wm.key] = (t && h && p) ? dailyStats(times, t, h, p) : {};
+  }
+  const dates = [...new Set(times.map(x=>x.slice(0,10)))];
+  const perDay = {};
+  for (const date of dates){
+    const matrix = {}, vals = [], stats = {};
+    for (const wm of WEATHER_MODELS){
+      const s = statsByModel[wm.key][date];
+      stats[wm.key] = s || null;
+      matrix[wm.key] = {};
+      for (const dm of DISEASE_MODELS){
+        const v = s ? score(dm.key, s, stage) : null;
+        matrix[wm.key][dm.key] = v;
+        if (v != null) vals.push(v);
+      }
+    }
+    if (!vals.length) continue;
+    perDay[date] = {matrix, stats, overall: median(vals), min: Math.min(...vals), max: Math.max(...vals), n: vals.length};
+  }
+  return {dates: Object.keys(perDay), perDay};
+}
+function gddFromArchive(arch){
+  const mx = arch.daily.temperature_2m_max, mn = arch.daily.temperature_2m_min;
+  let g = 0, last = null;
+  for (let i = 0; i < mx.length; i++){
+    if (mx[i] == null || mn[i] == null) continue;
+    g += Math.max(0, (mx[i] + mn[i]) / 2 - 10);
+    last = arch.daily.time[i];
+  }
+  return {gdd: g, until: last};
+}
+
+/* ===== 画面 ===== */
+const $ = id => document.getElementById(id);
+let LAST = null, SEL = null;
+
+function ymd(d){ return d.toISOString().slice(0,10); }
+function fmtDate(s){
+  const d = new Date(s + "T00:00:00");
+  return `${d.getMonth()+1}/${d.getDate()}(${"日月火水木金土"[d.getDay()]})`;
+}
+function avg(arr){ const a = arr.filter(x=>x!=null); return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
+function f1(x){ return x == null ? "—" : x.toFixed(1); }
+
+function setStatus(msg, err){ const s=$("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
+
+function renderPresets(){
+  const box = $("presets");
+  PRESETS.forEach((p,i)=>{
+    const b = document.createElement("button");
+    b.textContent = p.name;
+    b.onclick = ()=>{ $("lat").value=p.lat; $("lon").value=p.lon; [...box.children].forEach(c=>c.classList.remove("on")); b.classList.add("on"); };
+    box.appendChild(b);
+    if (i===0) b.click();
+  });
+}
+
+async function run(){
+  const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
+  if (!isFinite(lat) || !isFinite(lon)){ setStatus("緯度・経度を入れてください", true); return; }
+  setStatus("予報を取得中…");
+  $("run").disabled = true;
+  try{
+    const vars = "temperature_2m,relative_humidity_2m,precipitation";
+    const fUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}`+
+      `&models=${WEATHER_MODELS.map(m=>m.key).join(",")}&forecast_days=7&timezone=auto`;
+    const now = new Date();
+    const year = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+    const start = `${year}-04-01`;
+    let endD = new Date(now.getTime() - 6*864e5);
+    if (year < now.getFullYear()) endD = new Date(`${year}-10-31T00:00:00Z`);
+    const aUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}`+
+      `&start_date=${start}&end_date=${ymd(endD)}&daily=temperature_2m_max,temperature_2m_min&timezone=auto`;
+
+    const [fRes, aRes] = await Promise.all([
+      fetch(fUrl).then(r=>r.ok ? r.json() : Promise.reject(new Error("予報API " + r.status))),
+      fetch(aUrl).then(r=>r.ok ? r.json() : null).catch(()=>null),
+    ]);
+    let gddInfo = null;
+    if (aRes && aRes.daily) gddInfo = gddFromArchive(aRes);
+    LAST = {api:fRes, gddInfo, lat, lon};
+    SEL = null;
+    render();
+    setStatus(`取得しました（${new Date().toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}）`);
+  }catch(e){
+    setStatus("取得に失敗しました：" + e.message + "。通信状況を確認してもう一度試してください。", true);
+  }finally{
+    $("run").disabled = false;
+  }
+}
+
+function currentStage(){
+  const sel = $("stageSel").value;
+  if (sel !== "auto") return {idx:+sel, auto:false};
+  const m = new Date().getMonth() + 1;
+  if (!LAST.gddInfo) return {idx: (m>=11||m<=3) ? 0 : 3, auto:true, noGdd:true};
+  return {idx: stageFromGDD(LAST.gddInfo.gdd, m), auto:true};
+}
+
+function render(){
+  if (!LAST) return;
+  const st = currentStage();
+  const ev = evaluate(LAST.api, st.idx);
+  const out = $("out");
+  if (!ev.dates.length){ out.innerHTML = `<section class="card">予報データが空でした。</section>`; return; }
+  const next3 = ev.dates.slice(0,3);
+  const head = Math.max(...next3.map(d=>ev.perDay[d].overall));
+  const peakDay = next3.find(d=>ev.perDay[d].overall===head);
+  const lo = Math.min(...next3.map(d=>ev.perDay[d].min)), hi = Math.max(...next3.map(d=>ev.perDay[d].max));
+  if (!SEL || !ev.perDay[SEL]) SEL = peakDay;
+
+  let stageLine;
+  if (st.auto){
+    stageLine = st.noGdd
+      ? `自動推定：<b>${STAGES[st.idx].name}</b>（積算温度を取得できなかったため仮置き。手動で選べます）`
+      : `自動推定：<b>${STAGES[st.idx].name}</b>（4/1からの有効積算温度 ${Math.round(LAST.gddInfo.gdd)}℃・日、${LAST.gddInfo.until} まで）`;
+  } else stageLine = `手動設定：<b>${STAGES[st.idx].name}</b>`;
+
+  let html = `<section class="card"><div class="badge">
+    <div class="big lv${head}"><span class="n">${head}</span><span class="w">${LEVEL_WORD[head]}</span></div>
+    <div><div style="font-weight:700;font-size:16px">向こう3日の総合リスク：${LEVEL_WORD[head]}</div>
+    <div class="muted">ピーク ${fmtDate(peakDay)}・モデル間の幅 ${lo}〜${hi}</div>
+    <div class="muted" style="margin-top:4px">${stageLine}</div>
+    ${STAGES[st.idx].susceptible ? "" : `<div class="muted" style="margin-top:4px">感受性のない時期なので、すべて0になります。気象条件だけ見たいときはステージを手動で選んでください。</div>`}
+    </div></div></section>`;
+
+  html += `<section class="card"><h2>日別タイムライン</h2><div class="days">`;
+  for (const d of ev.dates){
+    const p = ev.perDay[d];
+    const S = WEATHER_MODELS.map(w=>p.stats[w.key]).filter(Boolean);
+    const tmax = avg(S.map(s=>s.tmax)), tmin = avg(S.map(s=>s.tmin));
+    const rains = S.map(s=>s.rain), rmin = Math.min(...rains), rmax = Math.max(...rains);
+    const wet = avg(S.map(s=>s.wet));
+    let rng = "";
+    for (let v = 0; v <= 4; v++) rng += `<i class="lv${v}" style="opacity:${v>=p.min&&v<=p.max?1:.15}"></i>`;
+    html += `<div class="day${d===SEL?" sel":""}" data-d="${d}">
+      <div class="d">${fmtDate(d)}</div>
+      <div class="wx">${f1(tmin)}〜${f1(tmax)}℃・雨 ${rmin.toFixed(0)}〜${rmax.toFixed(0)}mm・濡れ ${wet==null?"—":Math.round(wet)}h</div>
+      <div><span class="chip lv${p.overall}">${LEVEL_WORD[p.overall]}</span><span class="range">${rng}</span></div>
+    </div>`;
+  }
+  html += `</div><p class="muted" style="margin:8px 0 0">日をタップするとその日のマトリクスを表示。小さい色の帯はモデル間の幅（最小〜最大）。</p></section>`;
+
+  const P = ev.perDay[SEL];
+  html += `<section class="card"><h2>${fmtDate(SEL)} のマトリクス（気象 × 感染モデル）</h2><div class="tblwrap"><table>
+    <tr><th></th>${DISEASE_MODELS.map(m=>`<th>${m.label}</th>`).join("")}</tr>`;
+  for (const w of WEATHER_MODELS){
+    html += `<tr><th>${w.label}</th>`;
+    for (const m of DISEASE_MODELS){
+      const v = P.matrix[w.key][m.key];
+      html += v==null ? `<td class="muted">—</td>` : `<td class="c lv${v}">${v}</td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `</table></div>
+    <details><summary>この日の気象（モデル別）</summary><div class="tblwrap"><table>
+    <tr><th></th><th>最高</th><th>最低</th><th>平均</th><th>雨mm</th><th>濡れh</th><th>夜間高湿h</th></tr>`;
+  for (const w of WEATHER_MODELS){
+    const s = P.stats[w.key];
+    html += s ? `<tr><th>${w.label}</th><td>${f1(s.tmax)}</td><td>${f1(s.tmin)}</td><td>${f1(s.tmean)}</td><td>${f1(s.rain)}</td><td>${s.wet}</td><td>${s.night}</td></tr>`
+              : `<tr><th>${w.label}</th><td colspan="6" class="muted">データなし</td></tr>`;
+  }
+  html += `</table></div><p>濡れ＝0.2mm以上の降水か相対湿度90%以上の時間。夜間高湿＝20〜6時の相対湿度92%以上の時間。</p></details>
+    <p class="muted" style="margin:8px 0 0">総合（中央値）：<b>${LEVEL_WORD[P.overall]}</b>・幅 ${P.min}〜${P.max}（${P.n}通り）</p></section>`;
+
+  out.innerHTML = html;
+  out.querySelectorAll(".day").forEach(el=>el.onclick=()=>{ SEL = el.dataset.d; render(); });
+}
+
+if (typeof document !== "undefined" && document.getElementById("presets")){
+  renderPresets();
+  $("run").onclick = run;
+  $("stageSel").onchange = render;
+  $("geo").onclick = ()=>{
+    if (!navigator.geolocation){ setStatus("この環境では現在地が使えません", true); return; }
+    setStatus("現在地を取得中…");
+    navigator.geolocation.getCurrentPosition(
+      p=>{ $("lat").value=p.coords.latitude.toFixed(4); $("lon").value=p.coords.longitude.toFixed(4);
+           [...$("presets").children].forEach(c=>c.classList.remove("on")); setStatus("現在地を入れました"); },
+      ()=>setStatus("現在地を取得できませんでした（ブラウザの位置情報の許可を確認）", true),
+      {timeout:10000});
+  };
+}
+</script>
+</body>
+</html>
